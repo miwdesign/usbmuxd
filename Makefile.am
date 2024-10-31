@@ -6,7 +6,8 @@ EXTRA_DIST = \
 	docs \
 	COPYING.GPLv2 \
 	COPYING.GPLv3 \
-	README.md
+	README.md \
+	git-version-gen
 
 DISTCHECK_CONFIGURE_FLAGS = \
 	--with-udevrulesdir=$$dc_install_base/$(udevrulesdir) \
