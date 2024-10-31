@@ -13,6 +13,8 @@ else
   else
     if test -f "${SRCDIR}/.tarball-version"; then
       VER=`cat "${SRCDIR}/.tarball-version"`
+    else
+      VER=`sed -n '1s/Version \(.*\)/\1/p' ${SRCDIR}/NEWS`
     fi
   fi
 fi
