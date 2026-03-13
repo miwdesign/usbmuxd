@@ -34,10 +34,7 @@
 #include <libgen.h>
 #include <sys/stat.h>
 #include <errno.h>
-
-#ifdef WIN32
-#include <shlobj.h>
-#endif
+#include <ctype.h>
 
 #include <libimobiledevice-glue/utils.h>
 #include <plist/plist.h>
@@ -47,6 +44,8 @@
 #include "log.h"
 
 #ifdef WIN32
+#include <shlobj.h>
+
 #define DIR_SEP '\\'
 #define DIR_SEP_S "\\"
 #else
@@ -180,13 +179,26 @@ static int mkdir_with_parents(const char *dir, int mode)
 /**
  * Creates a freedesktop compatible configuration directory.
  */
-static void config_create_config_dir(void)
+static int config_create_config_dir(void)
 {
 	const char *config_path = config_get_config_dir();
 	struct stat st;
-	if (stat(config_path, &st) != 0) {
-		mkdir_with_parents(config_path, 0755);
+	int res = stat(config_path, &st);
+	if (res != 0) {
+		res = mkdir_with_parents(config_path, 0755);
 	}
+	return res;
+}
+
+int config_set_config_dir(const char* path)
+{
+	if (!path) {
+		return -1;
+	}
+	free(__config_dir);
+	__config_dir = strdup(path);
+	usbmuxd_log(LL_DEBUG, "Setting config_dir to %s", __config_dir);
+	return config_create_config_dir();
 }
 
 static int get_rand(int min, int max)
@@ -270,7 +282,10 @@ static int config_set_value(const char *key, plist_t value)
 	char *config_file = NULL;
 
 	/* Make sure config directory exists */
-	config_create_config_dir();
+	if (config_create_config_dir() < 0) {
+		usbmuxd_log(LL_ERROR, "ERROR: Failed to create config directory\n");
+		return -1;
+	}
 
 	config_path = config_get_config_dir();
 	config_file = string_concat(config_path, DIR_SEP_S, CONFIG_FILE, NULL);
@@ -342,7 +357,10 @@ int config_has_device_record(const char *udid)
 	if (!udid) return 0;
 
 	/* ensure config directory exists */
-	config_create_config_dir();
+	if (config_create_config_dir() < 0) {
+		usbmuxd_log(LL_ERROR, "ERROR: Failed to create config directory\n");
+		return -1;
+	}
 
 	/* build file path */
 	const char *config_path = config_get_config_dir();
@@ -408,12 +426,18 @@ int config_set_device_record(const char *udid, char* record_data, uint64_t recor
 	if (!udid || !record_data || record_size < 8)
 		return -EINVAL;
 
-	plist_t plist = NULL;
-	if (memcmp(record_data, "bplist00", 8) == 0) {
-		plist_from_bin(record_data, record_size, &plist);
-	} else {
-		plist_from_xml(record_data, record_size, &plist);
+	/* verify udid input */
+	const char* u = udid;
+	while (*u != '\0') {
+		if (!isalnum(*u) && (*u != '-')) {
+			usbmuxd_log(LL_ERROR, "ERROR: %s: udid contains invalid character.\n", __func__);
+			return -EINVAL;
+		}
+		u++;
 	}
+
+	plist_t plist = NULL;
+	plist_from_memory(record_data, record_size, &plist, NULL);
 
 	if (!plist || plist_get_node_type(plist) != PLIST_DICT) {
 		if (plist)
@@ -422,7 +446,10 @@ int config_set_device_record(const char *udid, char* record_data, uint64_t recor
 	}
 
 	/* ensure config directory exists */
-	config_create_config_dir();
+	if (config_create_config_dir() < 0) {
+		usbmuxd_log(LL_ERROR, "ERROR: Failed to create config directory\n");
+		return -1;
+	}
 
 	/* build file path */
 	const char *config_path = config_get_config_dir();
@@ -458,7 +485,10 @@ int config_get_device_record(const char *udid, char **record_data, uint64_t *rec
 	int res = 0;
 
 	/* ensure config directory exists */
-	config_create_config_dir();
+	if (config_create_config_dir() < 0) {
+		usbmuxd_log(LL_ERROR, "ERROR: Failed to create config directory\n");
+		return -1;
+	}
 
 	/* build file path */
 	const char *config_path = config_get_config_dir();
