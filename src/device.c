@@ -47,7 +47,7 @@ int next_device_id;
 
 #define DEV_MRU 65536
 
-#define CONN_INBUF_SIZE		262144
+#define CONN_INBUF_SIZE		1048576
 #define CONN_OUTBUF_SIZE	65536
 
 #define ACK_TIMEOUT 30
@@ -318,29 +318,26 @@ static void connection_teardown(struct mux_connection *conn)
 			conn->state = CONN_DEAD;
 			if((conn->events & POLLOUT) && conn->ib_size > 0){
 				usbmuxd_log(LL_DEBUG, "%s: flushing buffer to client (%u bytes)", __func__, conn->ib_size);
-				uint64_t tm_last = mstime64();
-				while(1){
+				/* Non-blocking best-effort flush: write what we can without
+				 * sleeping. The old code had a blocking usleep() loop that
+				 * stalled the entire single-threaded event loop for up to 1s,
+				 * causing all other clients and USB events to freeze. */
+				while(conn->ib_size > 0) {
 					size = client_write(conn->client, conn->ib_buf, conn->ib_size);
-					if(size < 0) {
-						usbmuxd_log(LL_ERROR, "%s: aborting buffer flush to client after error.", __func__);
-						break;
-					} else if (size == 0) {
-						uint64_t tm_now = mstime64();
-						if (tm_now - tm_last > 1000) {
-							usbmuxd_log(LL_ERROR, "%s: aborting buffer flush to client after unsuccessfully attempting for %dms.", __func__, (int)(tm_now - tm_last));
-							break;
+					if(size <= 0) {
+						if(size < 0) {
+							usbmuxd_log(LL_ERROR, "%s: aborting buffer flush to client after error.", __func__);
+						} else {
+							usbmuxd_log(LL_DEBUG, "%s: client not ready, discarding %u remaining bytes.", __func__, conn->ib_size);
 						}
-						usleep(10000);
-						continue;
+						break;
 					}
 					if(size == (int)conn->ib_size) {
 						conn->ib_size = 0;
-						break;
 					} else {
 						conn->ib_size -= size;
 						memmove(conn->ib_buf, conn->ib_buf + size, conn->ib_size);
 					}
-					tm_last = mstime64();
 				}
 			}
 			client_close(conn->client);
